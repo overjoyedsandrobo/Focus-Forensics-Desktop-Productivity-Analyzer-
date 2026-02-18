@@ -2,13 +2,13 @@
 
 Desktop productivity behavior analyzer for Windows.
 
-## What this MVP does
+## Features
 
 - Tracks active window title and process name
 - Tracks keyboard and mouse activity
 - Detects idle time
 - Auto-categorizes usage (`coding`, `browsing`, `gaming`, etc.)
-- Lets you edit category rules in-app (saved to `category_rules.json`)
+- Lets you edit category rules in-app
 - Stores local history in SQLite
 - Generates daily analytics:
   - Deep-focus time
@@ -18,35 +18,76 @@ Desktop productivity behavior analyzer for Windows.
 - Displays dashboard charts
 - Exports daily summaries as `json`, `csv`, or `txt`
 
-## Quick start
+## Requirements
 
-1. Install Python 3.10+
-2. Install dependencies:
+- Windows 10/11
+- Python 3.10+
+
+## Run from source
+
+1. Install dependencies:
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-3. Run:
+2. Start the app:
 
 ```powershell
 python main.py
 ```
 
+## How to use
+
+1. Open app and click `Start Tracking`.
+2. Work normally on your PC.
+3. Check:
+   - `Dashboard` for today metrics and category chart
+   - `Trends` for 7-day and 30-day score trends
+   - `Rules` to add/edit/delete categorization rules
+   - `History` for recent activity samples
+4. Click `Export Report` to save today summary as JSON/CSV/TXT.
+5. Click `Stop Tracking` before closing (optional; app also stops on exit).
+
 ## Build Windows .exe
+
+Use one of these options:
+
+### Option A: From PowerShell
 
 ```powershell
 .\build_exe.ps1
 ```
 
-After build:
+If script execution is blocked:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\build_exe.ps1
+```
+
+### Option B: From cmd.exe
+
+```cmd
+powershell -ExecutionPolicy Bypass -File .\build_exe.ps1
+```
+
+After a successful build:
 
 - Executable path: `dist\FocusForensics.exe`
-- Data files are stored in `%LOCALAPPDATA%\FocusForensics`
-  - `focus_forensics.db`
-  - `category_rules.json`
+
+## Data location
+
+Focus Forensics stores data locally at:
+
+`%LOCALAPPDATA%\FocusForensics`
+
+Files:
+
+- `focus_forensics.db` (activity history)
+- `category_rules.json` (custom categorization rules)
 
 ## Notes
 
 - This version is designed for Windows desktop tracking.
-- Data is stored locally in `%LOCALAPPDATA%\FocusForensics`.
+- No cloud sync is used in this MVP.
