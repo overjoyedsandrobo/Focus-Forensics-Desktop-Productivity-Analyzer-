@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Any
 
 
@@ -18,6 +19,22 @@ class DailyReport:
     distraction_spikes: int
     productivity_score: int
     category_breakdown_hours: dict[str, float]
+
+
+@dataclass
+class TrendPoint:
+    day: date
+    productivity_score: int
+    deep_focus_hours: float
+    distraction_spikes: int
+
+
+@dataclass
+class TrendReport:
+    points: list[TrendPoint]
+    average_score: float
+    average_deep_focus_hours: float
+    average_distraction_spikes: float
 
 
 def analyze_daily(samples: list[dict[str, Any]]) -> DailyReport:
@@ -79,4 +96,38 @@ def analyze_daily(samples: list[dict[str, Any]]) -> DailyReport:
             category: round(seconds / 3600.0, 2)
             for category, seconds in sorted(category_breakdown_seconds.items(), key=lambda item: item[1], reverse=True)
         },
+    )
+
+
+def analyze_trend(samples: list[dict[str, Any]], start_day: date, end_day: date) -> TrendReport:
+    by_day: dict[date, list[dict[str, Any]]] = defaultdict(list)
+    for sample in samples:
+        ts = str(sample["ts"])
+        sample_day = date.fromisoformat(ts[:10])
+        by_day[sample_day].append(sample)
+
+    points: list[TrendPoint] = []
+    cursor = start_day
+    while cursor <= end_day:
+        day_samples = by_day.get(cursor, [])
+        day_report = analyze_daily(day_samples)
+        points.append(
+            TrendPoint(
+                day=cursor,
+                productivity_score=day_report.productivity_score,
+                deep_focus_hours=day_report.deep_focus_hours,
+                distraction_spikes=day_report.distraction_spikes,
+            )
+        )
+        cursor += timedelta(days=1)
+
+    if not points:
+        return TrendReport([], 0.0, 0.0, 0.0)
+
+    count = float(len(points))
+    return TrendReport(
+        points=points,
+        average_score=round(sum(p.productivity_score for p in points) / count, 1),
+        average_deep_focus_hours=round(sum(p.deep_focus_hours for p in points) / count, 2),
+        average_distraction_spikes=round(sum(p.distraction_spikes for p in points) / count, 2),
     )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +84,21 @@ class Storage:
             rows = self._conn.execute(
                 "SELECT * FROM activity_samples ORDER BY ts DESC LIMIT ?;",
                 (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_samples_between(self, start_day: date, end_day: date) -> list[dict[str, Any]]:
+        start_ts = start_day.isoformat()
+        end_ts = (end_day + timedelta(days=1)).isoformat()
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT *
+                FROM activity_samples
+                WHERE ts >= ? AND ts < ?
+                ORDER BY ts ASC;
+                """,
+                (start_ts, end_ts),
             ).fetchall()
         return [dict(row) for row in rows]
 

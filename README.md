@@ -13,6 +13,7 @@ Desktop productivity behavior analyzer for Windows.
   - Deep-focus time
   - Distraction spikes
   - Productivity score
+- Shows weekly and monthly trend reports
 - Displays dashboard charts
 - Exports daily summaries as `json`, `csv`, or `txt`
 

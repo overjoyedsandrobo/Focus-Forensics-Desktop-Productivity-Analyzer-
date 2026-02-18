@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import tkinter as tk
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
-from focus_forensics.analyzer import DailyReport, analyze_daily
+from focus_forensics.analyzer import DailyReport, TrendReport, analyze_daily, analyze_trend
 from focus_forensics.exporter import export_csv, export_json, export_text
 from focus_forensics.storage import Storage
 from focus_forensics.tracker import ActivityTracker
@@ -30,6 +30,8 @@ class FocusForensicsApp:
         self.score_var = tk.StringVar(value="0")
         self.focus_var = tk.StringVar(value="0.0 h")
         self.spikes_var = tk.StringVar(value="0")
+        self.weekly_summary_var = tk.StringVar(value="No data yet")
+        self.monthly_summary_var = tk.StringVar(value="No data yet")
 
         self._build_ui()
         self._refresh()
@@ -52,7 +54,9 @@ class FocusForensicsApp:
 
         dashboard = ttk.Frame(notebook, padding=10)
         history = ttk.Frame(notebook, padding=10)
+        trends = ttk.Frame(notebook, padding=10)
         notebook.add(dashboard, text="Dashboard")
+        notebook.add(trends, text="Trends")
         notebook.add(history, text="History")
 
         metrics = ttk.Frame(dashboard)
@@ -83,6 +87,23 @@ class FocusForensicsApp:
         self.tree.column("idle", width=80, anchor=tk.CENTER)
         self.tree.pack(fill=tk.BOTH, expand=True)
 
+        trend_stats = ttk.Frame(trends)
+        trend_stats.pack(fill=tk.X, pady=(0, 10))
+
+        weekly_card = ttk.LabelFrame(trend_stats, text="Last 7 Days", padding=8)
+        weekly_card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+        ttk.Label(weekly_card, textvariable=self.weekly_summary_var, wraplength=420).pack(anchor=tk.W)
+
+        monthly_card = ttk.LabelFrame(trend_stats, text="Last 30 Days", padding=8)
+        monthly_card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        ttk.Label(monthly_card, textvariable=self.monthly_summary_var, wraplength=420).pack(anchor=tk.W)
+
+        self.trend_figure = Figure(figsize=(8, 4), dpi=100)
+        self.weekly_ax = self.trend_figure.add_subplot(121)
+        self.monthly_ax = self.trend_figure.add_subplot(122)
+        self.trend_canvas = FigureCanvasTkAgg(self.trend_figure, trends)
+        self.trend_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def start(self) -> None:
@@ -104,6 +125,7 @@ class FocusForensicsApp:
         report = analyze_daily(samples)
         self._render_metrics(report, samples)
         self._render_chart(report)
+        self._render_trends()
         self._render_history()
         self._refresh_job = self.root.after(4000, self._refresh)
 
@@ -146,6 +168,42 @@ class FocusForensicsApp:
                     "yes" if row["is_idle"] else "no",
                 ),
             )
+
+    def _render_trends(self) -> None:
+        end_day = date.today()
+        weekly_start = end_day - timedelta(days=6)
+        monthly_start = end_day - timedelta(days=29)
+
+        weekly_samples = self.storage.get_samples_between(weekly_start, end_day)
+        monthly_samples = self.storage.get_samples_between(monthly_start, end_day)
+        weekly = analyze_trend(weekly_samples, weekly_start, end_day)
+        monthly = analyze_trend(monthly_samples, monthly_start, end_day)
+
+        self.weekly_summary_var.set(self._format_trend_summary(weekly))
+        self.monthly_summary_var.set(self._format_trend_summary(monthly))
+
+        self._render_trend_plot(self.weekly_ax, weekly, "7-Day Productivity Score")
+        self._render_trend_plot(self.monthly_ax, monthly, "30-Day Productivity Score")
+        self.trend_figure.tight_layout()
+        self.trend_canvas.draw_idle()
+
+    def _render_trend_plot(self, axis, trend: TrendReport, title: str) -> None:
+        axis.clear()
+        labels = [point.day.strftime("%m-%d") for point in trend.points]
+        values = [point.productivity_score for point in trend.points]
+        if values:
+            axis.plot(labels, values, marker="o", linewidth=1.8)
+            axis.set_ylim(0, 100)
+            axis.set_ylabel("Score")
+            axis.tick_params(axis="x", rotation=35, labelsize=8)
+        axis.set_title(title, fontsize=10)
+
+    def _format_trend_summary(self, trend: TrendReport) -> str:
+        return (
+            f"Avg score: {trend.average_score} | "
+            f"Avg deep focus: {trend.average_deep_focus_hours}h/day | "
+            f"Avg spikes: {trend.average_distraction_spikes}/day"
+        )
 
     def export_report(self) -> None:
         samples = self.storage.get_samples_for_day(date.today())
