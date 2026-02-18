@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 
 hiddenimports = (
@@ -9,13 +9,19 @@ hiddenimports = (
     + collect_submodules("pynput.mouse")
     + collect_submodules("matplotlib.backends")
 )
+numpy_datas, numpy_binaries, numpy_hiddenimports = collect_all("numpy")
+matplotlib_datas, matplotlib_binaries, matplotlib_hiddenimports = collect_all("matplotlib")
+
+hiddenimports += numpy_hiddenimports + matplotlib_hiddenimports + ["numpy._core._exceptions"]
+binaries = numpy_binaries + matplotlib_binaries
+datas = numpy_datas + matplotlib_datas
 
 
 a = Analysis(
     ["main.py"],
     pathex=[],
-    binaries=[],
-    datas=[],
+    binaries=binaries,
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -36,7 +42,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
