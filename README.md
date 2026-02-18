@@ -8,6 +8,7 @@ Desktop productivity behavior analyzer for Windows.
 - Tracks keyboard and mouse activity
 - Detects idle time
 - Auto-categorizes usage (`coding`, `browsing`, `gaming`, etc.)
+- Lets you edit category rules in-app (saved to `category_rules.json`)
 - Stores local history in SQLite
 - Generates daily analytics:
   - Deep-focus time
