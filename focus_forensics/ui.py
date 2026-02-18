@@ -11,6 +11,7 @@ from matplotlib.figure import Figure
 from focus_forensics.analyzer import DailyReport, TrendReport, analyze_daily, analyze_trend
 from focus_forensics.categorizer import CategoryRulesStore, parse_keywords
 from focus_forensics.exporter import export_csv, export_json, export_text
+from focus_forensics.paths import data_file
 from focus_forensics.storage import Storage
 from focus_forensics.tracker import ActivityTracker
 
@@ -21,8 +22,8 @@ class FocusForensicsApp:
         self.root.title("Focus Forensics")
         self.root.geometry("980x700")
 
-        self.storage = Storage(Path("focus_forensics.db"))
-        self.rules_store = CategoryRulesStore(Path("category_rules.json"))
+        self.storage = Storage(data_file("focus_forensics.db"))
+        self.rules_store = CategoryRulesStore(data_file("category_rules.json"))
         self.tracker = ActivityTracker(self.storage, rules_store=self.rules_store)
         self._tracking = False
         self._refresh_job: str | None = None
@@ -353,5 +354,5 @@ class FocusForensicsApp:
 
 def run_app() -> None:
     root = tk.Tk()
-    root.app = FocusForensicsApp(root)  # Keep a strong reference for app lifetime.
+    app = FocusForensicsApp(root)
     root.mainloop()

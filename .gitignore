@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 focus_forensics.db
 category_rules.json
+build/
+dist/

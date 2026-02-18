@@ -6,12 +6,12 @@ import time
 from ctypes import wintypes
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 
 import psutil
 from pynput import keyboard, mouse
 
 from focus_forensics.categorizer import CategoryRulesStore
+from focus_forensics.paths import data_file
 from focus_forensics.storage import Storage
 
 
@@ -30,7 +30,7 @@ class ActivityTracker:
         idle_threshold_seconds: float = 60.0,
     ) -> None:
         self.storage = storage
-        self.rules_store = rules_store or CategoryRulesStore(Path("category_rules.json"))
+        self.rules_store = rules_store or CategoryRulesStore(data_file("category_rules.json"))
         self.sample_interval = sample_interval
         self.idle_threshold_seconds = idle_threshold_seconds
 

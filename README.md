@@ -33,7 +33,20 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## Build Windows .exe
+
+```powershell
+.\build_exe.ps1
+```
+
+After build:
+
+- Executable path: `dist\FocusForensics.exe`
+- Data files are stored in `%LOCALAPPDATA%\FocusForensics`
+  - `focus_forensics.db`
+  - `category_rules.json`
+
 ## Notes
 
 - This version is designed for Windows desktop tracking.
-- Data is stored locally in `focus_forensics.db` in the project folder.
+- Data is stored locally in `%LOCALAPPDATA%\FocusForensics`.
