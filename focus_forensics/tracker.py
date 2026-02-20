@@ -6,6 +6,7 @@ import time
 from ctypes import wintypes
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Callable
 
 import psutil
 from pynput import keyboard, mouse
@@ -26,13 +27,17 @@ class ActivityTracker:
         self,
         storage: Storage,
         rules_store: CategoryRulesStore | None = None,
+        unknown_app_callback: Callable[[str, str], None] | None = None,
         sample_interval: float = 3.0,
         idle_threshold_seconds: float = 60.0,
+        unknown_prompt_cooldown_seconds: float = 300.0,
     ) -> None:
         self.storage = storage
         self.rules_store = rules_store or CategoryRulesStore(data_file("category_rules.json"))
+        self.unknown_app_callback = unknown_app_callback
         self.sample_interval = sample_interval
         self.idle_threshold_seconds = idle_threshold_seconds
+        self.unknown_prompt_cooldown_seconds = unknown_prompt_cooldown_seconds
 
         self._running = False
         self._thread: threading.Thread | None = None
@@ -42,6 +47,8 @@ class ActivityTracker:
         self._mouse_events = 0
         self._keyboard_listener: keyboard.Listener | None = None
         self._mouse_listener: mouse.Listener | None = None
+        self._pending_unknown_processes: set[str] = set()
+        self._unknown_retry_after: dict[str, float] = {}
 
     def _on_key(self, _key: keyboard.KeyCode) -> None:
         with self._lock:
@@ -92,6 +99,21 @@ class ActivityTracker:
             loop_start = time.time()
             window = get_active_window_info()
             category = self.rules_store.categorize(window.process_name, window.title)
+            process_key = window.process_name.lower()
+
+            if category == "other":
+                now_epoch = time.time()
+                notify = False
+                with self._lock:
+                    retry_after = self._unknown_retry_after.get(process_key, 0.0)
+                    if now_epoch >= retry_after and process_key not in self._pending_unknown_processes:
+                        self._pending_unknown_processes.add(process_key)
+                        notify = True
+                if notify and self.unknown_app_callback:
+                    self.unknown_app_callback(window.process_name, window.title)
+                elapsed = time.time() - loop_start
+                time.sleep(max(0.05, self.sample_interval - elapsed))
+                continue
 
             now = time.time()
             with self._lock:
@@ -116,6 +138,15 @@ class ActivityTracker:
             )
             elapsed = time.time() - loop_start
             time.sleep(max(0.05, self.sample_interval - elapsed))
+
+    def resolve_unknown_process(self, process_name: str, resolved: bool) -> None:
+        process_key = process_name.lower()
+        with self._lock:
+            self._pending_unknown_processes.discard(process_key)
+            if resolved:
+                self._unknown_retry_after.pop(process_key, None)
+            else:
+                self._unknown_retry_after[process_key] = time.time() + self.unknown_prompt_cooldown_seconds
 
 
 def get_active_window_info() -> WindowInfo:

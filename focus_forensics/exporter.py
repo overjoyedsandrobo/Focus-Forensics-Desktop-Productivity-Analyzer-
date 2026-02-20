@@ -2,22 +2,52 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from focus_forensics.analyzer import DailyReport
 
 
 def export_json(path: Path, target_day: date, report: DailyReport) -> None:
+    total_hours = max(report.total_hours, 0.0)
+    category_items = []
+    for category, hours in report.category_breakdown_hours.items():
+        percent = round((hours / total_hours) * 100.0, 1) if total_hours > 0 else 0.0
+        category_items.append(
+            {
+                "category": category,
+                "hours": hours,
+                "percent_of_day": percent,
+            }
+        )
+
+    insights: list[str] = []
+    if report.productivity_score >= 80:
+        insights.append("Strong day: productivity score is in a high-performance range.")
+    elif report.productivity_score >= 60:
+        insights.append("Moderate day: productivity score is stable with room to improve.")
+    else:
+        insights.append("Low-productivity day: focus quality and distractions need attention.")
+
+    if report.distraction_spikes > 0:
+        insights.append(f"{report.distraction_spikes} distraction spike(s) detected from productive to distracting apps.")
+    if report.deep_focus_hours > 0:
+        insights.append(f"Deep-focus sessions totaled {report.deep_focus_hours} hour(s).")
+
     payload = {
+        "report_name": "Focus Forensics Daily Report",
         "date": target_day.isoformat(),
-        "total_hours": report.total_hours,
-        "productive_hours": report.productive_hours,
-        "idle_hours": report.idle_hours,
-        "deep_focus_hours": report.deep_focus_hours,
-        "distraction_spikes": report.distraction_spikes,
-        "productivity_score": report.productivity_score,
-        "category_breakdown_hours": report.category_breakdown_hours,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "overview": {
+            "total_hours": report.total_hours,
+            "productive_hours": report.productive_hours,
+            "idle_hours": report.idle_hours,
+            "deep_focus_hours": report.deep_focus_hours,
+            "distraction_spikes": report.distraction_spikes,
+            "productivity_score": report.productivity_score,
+        },
+        "category_breakdown": category_items,
+        "insights": insights,
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

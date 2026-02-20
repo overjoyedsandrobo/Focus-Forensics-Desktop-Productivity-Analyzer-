@@ -97,6 +97,24 @@ class CategoryRulesStore:
             self._rules = list(DEFAULT_RULES)
             self.save()
 
+    def upsert_keyword(self, category: str, keyword: str) -> None:
+        clean_category = category.strip().lower()
+        clean_keyword = keyword.strip().lower()
+        if not clean_category or not clean_keyword:
+            raise ValueError("Category and keyword are required.")
+        with self._lock:
+            for idx, rule in enumerate(self._rules):
+                if rule.category != clean_category:
+                    continue
+                if clean_keyword in rule.keywords:
+                    return
+                merged = tuple(dict.fromkeys(rule.keywords + (clean_keyword,)))
+                self._rules[idx] = CategoryRule(rule.category, merged)
+                self.save()
+                return
+            self._rules.append(CategoryRule(clean_category, (clean_keyword,)))
+            self.save()
+
     def _normalize_rule(self, category: str, keywords: Iterable[str]) -> CategoryRule:
         clean_category = category.strip().lower()
         clean_keywords = tuple(keyword.strip().lower() for keyword in keywords if keyword.strip())

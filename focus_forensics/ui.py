@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import tkinter as tk
+from queue import Empty, Queue
 from datetime import date, timedelta
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
@@ -13,6 +14,7 @@ from focus_forensics.categorizer import CategoryRulesStore, parse_keywords
 from focus_forensics.exporter import export_csv, export_json, export_text
 from focus_forensics.paths import data_file
 from focus_forensics.storage import Storage
+from focus_forensics.tray import TrayController
 from focus_forensics.tracker import ActivityTracker
 
 
@@ -24,7 +26,16 @@ class FocusForensicsApp:
 
         self.storage = Storage(data_file("focus_forensics.db"))
         self.rules_store = CategoryRulesStore(data_file("category_rules.json"))
-        self.tracker = ActivityTracker(self.storage, rules_store=self.rules_store)
+        self._unknown_queue: Queue[tuple[str, str]] = Queue()
+        self._shutting_down = False
+        self._shown_background_hint = False
+        self.tracker = ActivityTracker(
+            self.storage,
+            rules_store=self.rules_store,
+            unknown_app_callback=self._queue_unknown_app,
+        )
+        self.tray = TrayController(self._show_from_background, self._exit_from_tray)
+        self._tray_enabled = self.tray.start()
         self._tracking = False
         self._refresh_job: str | None = None
 
@@ -140,7 +151,8 @@ class FocusForensicsApp:
 
         self._render_rules()
 
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close_request)
+        self.root.bind("<Unmap>", self._on_window_unmap)
 
     def start(self) -> None:
         if self._tracking:
@@ -157,6 +169,7 @@ class FocusForensicsApp:
         self.status_var.set("Stopped")
 
     def _refresh(self) -> None:
+        self._process_unknown_prompts()
         samples = self.storage.get_samples_for_day(date.today())
         report = analyze_daily(samples)
         self._render_metrics(report, samples)
@@ -222,6 +235,56 @@ class FocusForensicsApp:
         self._render_trend_plot(self.monthly_ax, monthly, "30-Day Productivity Score")
         self.trend_figure.tight_layout()
         self.trend_canvas.draw_idle()
+
+    def _queue_unknown_app(self, process_name: str, window_title: str) -> None:
+        self._unknown_queue.put((process_name, window_title))
+
+    def _process_unknown_prompts(self) -> None:
+        while True:
+            try:
+                process_name, window_title = self._unknown_queue.get_nowait()
+            except Empty:
+                return
+            self._prompt_unknown_app(process_name, window_title)
+
+    def _prompt_unknown_app(self, process_name: str, window_title: str) -> None:
+        self._show_from_background()
+        short_title = window_title[:90] if window_title else "(no title)"
+        category = simpledialog.askstring(
+            "Uncategorized App Detected",
+            (
+                f"Focus Forensics detected an uncategorized app:\n\n"
+                f"Process: {process_name}\n"
+                f"Window: {short_title}\n\n"
+                "Type the category to use (example: coding, browsing, gaming)."
+            ),
+            parent=self.root,
+        )
+        if not category:
+            self.tracker.resolve_unknown_process(process_name, resolved=False)
+            return
+
+        default_keyword = process_name.rsplit(".", 1)[0].lower()
+        keyword = simpledialog.askstring(
+            "Keyword for Rule",
+            (
+                f"Enter a keyword that identifies {process_name}.\n"
+                "This will be saved in the selected category rule."
+            ),
+            initialvalue=default_keyword,
+            parent=self.root,
+        )
+        keyword_value = (keyword or default_keyword).strip().lower()
+        if not keyword_value:
+            self.tracker.resolve_unknown_process(process_name, resolved=False)
+            return
+
+        self._save_keyword_rule(category.strip().lower(), keyword_value)
+        self._render_rules()
+        self.tracker.resolve_unknown_process(process_name, resolved=True)
+
+    def _save_keyword_rule(self, category: str, keyword: str) -> None:
+        self.rules_store.upsert_keyword(category, keyword)
 
     def _render_trend_plot(self, axis, trend: TrendReport, title: str) -> None:
         axis.clear()
@@ -343,11 +406,54 @@ class FocusForensicsApp:
             export_json(out_path, date.today(), report)
         messagebox.showinfo("Focus Forensics", f"Report exported to:\n{out_path}")
 
-    def _on_close(self) -> None:
+    def _on_window_unmap(self, _event=None) -> None:
+        if self._shutting_down:
+            return
+        if self.root.state() == "iconic":
+            self._hide_to_background()
+
+    def _hide_to_background(self) -> None:
+        if not self._tray_enabled:
+            return
+        self.root.withdraw()
+        if not self._shown_background_hint:
+            self.tray.notify(
+                "Focus Forensics",
+                "App is running in background. Use the tray icon to restore.",
+            )
+            self._shown_background_hint = True
+
+    def _show_from_background(self) -> None:
+        self.root.after(0, self._restore_window)
+
+    def _restore_window(self) -> None:
+        if self._shutting_down:
+            return
+        self.root.deiconify()
+        self.root.state("normal")
+        self.root.lift()
+        self.root.focus_force()
+
+    def _exit_from_tray(self) -> None:
+        self.root.after(0, self._shutdown)
+
+    def _on_close_request(self) -> None:
+        if self._shutting_down:
+            return
+        if not self._tray_enabled:
+            self._shutdown()
+            return
+        self._hide_to_background()
+
+    def _shutdown(self) -> None:
+        if self._shutting_down:
+            return
+        self._shutting_down = True
         if self._refresh_job:
             self.root.after_cancel(self._refresh_job)
         if self._tracking:
             self.tracker.stop()
+        self.tray.stop()
         self.storage.close()
         self.root.destroy()
 

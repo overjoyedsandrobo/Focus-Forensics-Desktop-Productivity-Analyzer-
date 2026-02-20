@@ -8,13 +8,23 @@ hiddenimports = (
     collect_submodules("pynput.keyboard")
     + collect_submodules("pynput.mouse")
     + collect_submodules("matplotlib.backends")
+    + collect_submodules("pystray")
+    + collect_submodules("PIL")
 )
 numpy_datas, numpy_binaries, numpy_hiddenimports = collect_all("numpy")
 matplotlib_datas, matplotlib_binaries, matplotlib_hiddenimports = collect_all("matplotlib")
+pillow_datas, pillow_binaries, pillow_hiddenimports = collect_all("PIL")
+pystray_datas, pystray_binaries, pystray_hiddenimports = collect_all("pystray")
 
-hiddenimports += numpy_hiddenimports + matplotlib_hiddenimports + ["numpy._core._exceptions"]
-binaries = numpy_binaries + matplotlib_binaries
-datas = numpy_datas + matplotlib_datas
+hiddenimports += (
+    numpy_hiddenimports
+    + matplotlib_hiddenimports
+    + pillow_hiddenimports
+    + pystray_hiddenimports
+    + ["numpy._core._exceptions"]
+)
+binaries = numpy_binaries + matplotlib_binaries + pillow_binaries + pystray_binaries
+datas = numpy_datas + matplotlib_datas + pillow_datas + pystray_datas
 
 
 a = Analysis(

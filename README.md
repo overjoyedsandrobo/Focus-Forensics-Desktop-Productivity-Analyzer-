@@ -9,6 +9,7 @@ Desktop productivity behavior analyzer for Windows.
 - Detects idle time
 - Auto-categorizes usage (`coding`, `browsing`, `gaming`, etc.)
 - Lets you edit category rules in-app
+- Prompts you to classify uncategorized apps while tracking
 - Stores local history in SQLite
 - Generates daily analytics:
   - Deep-focus time
@@ -16,6 +17,7 @@ Desktop productivity behavior analyzer for Windows.
   - Productivity score
 - Shows weekly and monthly trend reports
 - Displays dashboard charts
+- Minimizes to system tray and keeps tracking in background
 - Exports daily summaries as `json`, `csv`, or `txt`
 
 ## Requirements

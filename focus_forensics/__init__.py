@@ -4,6 +4,7 @@ __all__ = [
     "exporter",
     "paths",
     "storage",
+    "tray",
     "tracker",
     "ui",
 ]
