@@ -11,6 +11,7 @@ Desktop productivity behavior analyzer for Windows.
 - Lets you edit category rules in-app
 - Prompts you to classify uncategorized apps while tracking
 - Stores local history in SQLite
+- Includes light/dark theme toggle (saved in settings)
 - Generates daily analytics:
   - Deep-focus time
   - Distraction spikes

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tkinter as tk
 from queue import Empty, Queue
 from datetime import date, timedelta
@@ -25,6 +26,8 @@ class FocusForensicsApp:
         self.root.geometry("980x700")
 
         self.storage = Storage(data_file("focus_forensics.db"))
+        self.settings_path = data_file("settings.json")
+        self._settings = self._load_settings()
         self.rules_store = CategoryRulesStore(data_file("category_rules.json"))
         self._unknown_queue: Queue[tuple[str, str]] = Queue()
         self._shutting_down = False
@@ -48,8 +51,11 @@ class FocusForensicsApp:
         self.monthly_summary_var = tk.StringVar(value="No data yet")
         self.rule_category_var = tk.StringVar(value="")
         self.rule_keywords_var = tk.StringVar(value="")
+        self.dark_mode_var = tk.BooleanVar(value=bool(self._settings.get("dark_mode", False)))
+        self.style = ttk.Style(self.root)
 
         self._build_ui()
+        self._apply_theme()
         self._refresh()
 
     def _build_ui(self) -> None:
@@ -62,6 +68,12 @@ class FocusForensicsApp:
         ttk.Button(top, text="Start Tracking", command=self.start).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(top, text="Stop Tracking", command=self.stop).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(top, text="Export Report", command=self.export_report).pack(side=tk.LEFT)
+        ttk.Checkbutton(
+            top,
+            text="Dark Mode",
+            variable=self.dark_mode_var,
+            command=self._toggle_dark_mode,
+        ).pack(side=tk.RIGHT)
         ttk.Label(top, text="Status:").pack(side=tk.LEFT, padx=(20, 4))
         ttk.Label(top, textvariable=self.status_var).pack(side=tk.LEFT)
 
@@ -151,7 +163,7 @@ class FocusForensicsApp:
 
         self._render_rules()
 
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close_request)
+        self.root.protocol("WM_DELETE_WINDOW", self._shutdown)
         self.root.bind("<Unmap>", self._on_window_unmap)
 
     def start(self) -> None:
@@ -167,6 +179,95 @@ class FocusForensicsApp:
         self.tracker.stop()
         self._tracking = False
         self.status_var.set("Stopped")
+
+    def _load_settings(self) -> dict:
+        try:
+            return json.loads(self.settings_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {"dark_mode": False}
+
+    def _save_settings(self) -> None:
+        self.settings_path.write_text(json.dumps(self._settings, indent=2), encoding="utf-8")
+
+    def _toggle_dark_mode(self) -> None:
+        self._settings["dark_mode"] = bool(self.dark_mode_var.get())
+        self._save_settings()
+        self._apply_theme()
+
+    def _apply_theme(self) -> None:
+        dark = bool(self.dark_mode_var.get())
+        self.style.theme_use("clam")
+        if dark:
+            colors = {
+                "bg": "#161b22",
+                "panel": "#0f141b",
+                "fg": "#e6edf3",
+                "muted": "#9ba9b4",
+                "accent": "#2f7ed8",
+                "tree_bg": "#11161d",
+                "tree_sel": "#1f4f82",
+                "chart_bg": "#0f141b",
+                "chart_axis": "#e6edf3",
+                "chart_grid": "#2a3440",
+                "bar": "#4c9ae8",
+                "line": "#66b3ff",
+            }
+        else:
+            colors = {
+                "bg": "#f3f6fb",
+                "panel": "#ffffff",
+                "fg": "#1f2933",
+                "muted": "#52606d",
+                "accent": "#2f7ed8",
+                "tree_bg": "#ffffff",
+                "tree_sel": "#d9ebff",
+                "chart_bg": "#ffffff",
+                "chart_axis": "#1f2933",
+                "chart_grid": "#d4dde8",
+                "bar": "#2f7ed8",
+                "line": "#2f7ed8",
+            }
+
+        self._theme_colors = colors
+        self.root.configure(bg=colors["bg"])
+        self.style.configure(".", background=colors["bg"], foreground=colors["fg"])
+        self.style.configure("TFrame", background=colors["bg"])
+        self.style.configure("TLabelframe", background=colors["bg"], foreground=colors["fg"])
+        self.style.configure("TLabelframe.Label", background=colors["bg"], foreground=colors["fg"])
+        self.style.configure("TLabel", background=colors["bg"], foreground=colors["fg"])
+        self.style.configure("TButton", background=colors["panel"], foreground=colors["fg"])
+        self.style.configure("TCheckbutton", background=colors["bg"], foreground=colors["fg"])
+        self.style.map(
+            "TCheckbutton",
+            background=[("active", colors["bg"])],
+            foreground=[("active", colors["fg"])],
+        )
+        self.style.configure("TEntry", fieldbackground=colors["panel"], foreground=colors["fg"])
+        self.style.configure("Treeview", background=colors["tree_bg"], foreground=colors["fg"], fieldbackground=colors["tree_bg"])
+        self.style.configure("Treeview.Heading", background=colors["panel"], foreground=colors["fg"])
+        self.style.map("Treeview", background=[("selected", colors["tree_sel"])], foreground=[("selected", colors["fg"])])
+        self.style.configure("TNotebook", background=colors["bg"], borderwidth=0)
+        self.style.configure("TNotebook.Tab", background=colors["panel"], foreground=colors["fg"], padding=(10, 5))
+        self.style.map("TNotebook.Tab", background=[("selected", colors["accent"])], foreground=[("selected", "#ffffff")])
+
+        self.canvas.get_tk_widget().configure(bg=colors["chart_bg"], highlightthickness=0)
+        self.trend_canvas.get_tk_widget().configure(bg=colors["chart_bg"], highlightthickness=0)
+        self._apply_chart_theme()
+
+    def _apply_chart_theme(self) -> None:
+        colors = self._theme_colors
+        for figure in (self.figure, self.trend_figure):
+            figure.patch.set_facecolor(colors["chart_bg"])
+        for axis in (self.ax, self.weekly_ax, self.monthly_ax):
+            axis.set_facecolor(colors["chart_bg"])
+            axis.tick_params(axis="x", colors=colors["chart_axis"])
+            axis.tick_params(axis="y", colors=colors["chart_axis"])
+            axis.xaxis.label.set_color(colors["chart_axis"])
+            axis.yaxis.label.set_color(colors["chart_axis"])
+            axis.title.set_color(colors["chart_axis"])
+            for spine in axis.spines.values():
+                spine.set_color(colors["chart_grid"])
+            axis.grid(color=colors["chart_grid"], alpha=0.35, linewidth=0.7)
 
     def _refresh(self) -> None:
         self._process_unknown_prompts()
@@ -190,10 +291,11 @@ class FocusForensicsApp:
 
     def _render_chart(self, report: DailyReport) -> None:
         self.ax.clear()
+        self._apply_chart_theme()
         categories = list(report.category_breakdown_hours.keys())
         hours = [report.category_breakdown_hours[c] for c in categories]
         if categories:
-            self.ax.bar(categories, hours)
+            self.ax.bar(categories, hours, color=self._theme_colors["bar"])
             self.ax.set_ylabel("Hours")
             self.ax.set_title("Today's Time by Category")
             self.ax.tick_params(axis="x", rotation=35)
@@ -248,8 +350,9 @@ class FocusForensicsApp:
             self._prompt_unknown_app(process_name, window_title)
 
     def _prompt_unknown_app(self, process_name: str, window_title: str) -> None:
-        self._show_from_background()
+        self._show_from_background_now()
         short_title = window_title[:90] if window_title else "(no title)"
+        self._bring_prompt_to_front()
         category = simpledialog.askstring(
             "Uncategorized App Detected",
             (
@@ -288,10 +391,11 @@ class FocusForensicsApp:
 
     def _render_trend_plot(self, axis, trend: TrendReport, title: str) -> None:
         axis.clear()
+        self._apply_chart_theme()
         labels = [point.day.strftime("%m-%d") for point in trend.points]
         values = [point.productivity_score for point in trend.points]
         if values:
-            axis.plot(labels, values, marker="o", linewidth=1.8)
+            axis.plot(labels, values, marker="o", linewidth=1.8, color=self._theme_colors["line"])
             axis.set_ylim(0, 100)
             axis.set_ylabel("Score")
             axis.tick_params(axis="x", rotation=35, labelsize=8)
@@ -426,6 +530,9 @@ class FocusForensicsApp:
     def _show_from_background(self) -> None:
         self.root.after(0, self._restore_window)
 
+    def _show_from_background_now(self) -> None:
+        self._restore_window()
+
     def _restore_window(self) -> None:
         if self._shutting_down:
             return
@@ -433,17 +540,14 @@ class FocusForensicsApp:
         self.root.state("normal")
         self.root.lift()
         self.root.focus_force()
+        self.root.update_idletasks()
+
+    def _bring_prompt_to_front(self) -> None:
+        self.root.attributes("-topmost", True)
+        self.root.after(250, lambda: self.root.attributes("-topmost", False))
 
     def _exit_from_tray(self) -> None:
         self.root.after(0, self._shutdown)
-
-    def _on_close_request(self) -> None:
-        if self._shutting_down:
-            return
-        if not self._tray_enabled:
-            self._shutdown()
-            return
-        self._hide_to_background()
 
     def _shutdown(self) -> None:
         if self._shutting_down:
