@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,14 +27,21 @@ DEFAULT_RULES: tuple[CategoryRule, ...] = (
 
 def categorize(process_name: str, window_title: str, rules: Iterable[CategoryRule] = DEFAULT_RULES) -> str:
     haystack = f"{process_name} {window_title}".lower()
+    normalized_haystack = _normalize_text(haystack)
     for rule in rules:
-        if any(keyword in haystack for keyword in rule.keywords):
-            return rule.category
+        for keyword in rule.keywords:
+            normalized_keyword = _normalize_text(keyword)
+            if keyword in haystack or (normalized_keyword and normalized_keyword in normalized_haystack):
+                return rule.category
     return "other"
 
 
 def parse_keywords(raw: str) -> tuple[str, ...]:
     return tuple(part.strip().lower() for part in raw.split(",") if part.strip())
+
+
+def _normalize_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
 
 
 class CategoryRulesStore:

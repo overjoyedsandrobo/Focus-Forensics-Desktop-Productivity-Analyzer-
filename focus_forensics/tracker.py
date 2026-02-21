@@ -49,6 +49,7 @@ class ActivityTracker:
         self._mouse_listener: mouse.Listener | None = None
         self._pending_unknown_processes: set[str] = set()
         self._unknown_retry_after: dict[str, float] = {}
+        self._internal_process_names = {"focusforensics.exe", "focusforensics"}
 
     def _on_key(self, _key: keyboard.KeyCode) -> None:
         with self._lock:
@@ -98,6 +99,10 @@ class ActivityTracker:
         while self._running:
             loop_start = time.time()
             window = get_active_window_info()
+            if self._is_internal_window(window):
+                elapsed = time.time() - loop_start
+                time.sleep(max(0.05, self.sample_interval - elapsed))
+                continue
             category = self.rules_store.categorize(window.process_name, window.title)
             process_key = window.process_name.lower()
 
@@ -147,6 +152,15 @@ class ActivityTracker:
                 self._unknown_retry_after.pop(process_key, None)
             else:
                 self._unknown_retry_after[process_key] = time.time() + self.unknown_prompt_cooldown_seconds
+
+    def _is_internal_window(self, window: WindowInfo) -> bool:
+        process = window.process_name.lower()
+        title = window.title.lower()
+        if process in self._internal_process_names:
+            return True
+        if "focus forensics" in title and process == "python.exe":
+            return True
+        return False
 
 
 def get_active_window_info() -> WindowInfo:

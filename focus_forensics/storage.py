@@ -102,6 +102,10 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def clear_all_samples(self) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM activity_samples;")
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()

@@ -68,6 +68,7 @@ class FocusForensicsApp:
         ttk.Button(top, text="Start Tracking", command=self.start).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(top, text="Stop Tracking", command=self.stop).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(top, text="Export Report", command=self.export_report).pack(side=tk.LEFT)
+        ttk.Button(top, text="Clear History", command=self.clear_history).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Checkbutton(
             top,
             text="Dark Mode",
@@ -509,6 +510,16 @@ class FocusForensicsApp:
         else:
             export_json(out_path, date.today(), report)
         messagebox.showinfo("Focus Forensics", f"Report exported to:\n{out_path}")
+
+    def clear_history(self) -> None:
+        if not messagebox.askyesno("Clear History", "Delete all previously recorded activity history?"):
+            return
+        self.storage.clear_all_samples()
+        self._render_history()
+        self._render_metrics(analyze_daily([]), [])
+        self._render_chart(analyze_daily([]))
+        self._render_trends()
+        messagebox.showinfo("Clear History", "All recorded history has been deleted.")
 
     def _on_window_unmap(self, _event=None) -> None:
         if self._shutting_down:
