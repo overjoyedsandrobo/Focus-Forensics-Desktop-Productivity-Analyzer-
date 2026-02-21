@@ -13,6 +13,7 @@ Desktop productivity behavior analyzer for Windows.
 - Stores local history in SQLite
 - Includes light/dark theme toggle (saved in settings)
 - Ignores Focus Forensics itself and auto-marks common Windows shell/utility windows as `system_idle`
+- Rules tab supports explicit `Application + Keyword + Category` mappings
 - Generates daily analytics:
   - Deep-focus time
   - Distraction spikes

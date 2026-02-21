@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import threading
 import time
 from ctypes import wintypes
@@ -45,6 +46,7 @@ SYSTEM_IDLE_TITLE_KEYWORDS = (
 class WindowInfo:
     title: str
     process_name: str
+    pid: int = 0
 
 
 class ActivityTracker:
@@ -75,6 +77,17 @@ class ActivityTracker:
         self._pending_unknown_processes: set[str] = set()
         self._unknown_retry_after: dict[str, float] = {}
         self._internal_process_names = {"focusforensics.exe", "focusforensics"}
+        self._internal_title_keywords = ("uncategorized app detected", "keyword for rule")
+        self._app_pid = os.getpid()
+        self._segment_signature: tuple[str, str] | None = None
+        self._segment_start_ts: float | None = None
+        self._segment_window_title = ""
+        self._segment_process_name = ""
+        self._segment_category = ""
+        self._segment_is_idle = False
+        self._segment_keyboard_events = 0
+        self._segment_mouse_events = 0
+        self._segment_duration_seconds = 0.0
 
     def _on_key(self, _key: keyboard.KeyCode) -> None:
         with self._lock:
@@ -121,59 +134,86 @@ class ActivityTracker:
             self._thread.join(timeout=2)
 
     def _run(self) -> None:
-        while self._running:
-            loop_start = time.time()
-            window = get_active_window_info()
-            if self._is_internal_window(window):
-                elapsed = time.time() - loop_start
-                time.sleep(max(0.05, self.sample_interval - elapsed))
-                continue
+        try:
+            while self._running:
+                loop_start = time.time()
+                window = get_active_window_info()
+                if self._is_internal_window(window):
+                    elapsed = time.time() - loop_start
+                    time.sleep(max(0.05, self.sample_interval - elapsed))
+                    continue
 
-            category = self._categorize_or_system_idle(window)
-            process_key = window.process_name.lower()
+                category = self._categorize_or_system_idle(window)
+                process_key = window.process_name.lower()
 
-            if category == "other":
-                now_epoch = time.time()
-                notify = False
+                if category == "other":
+                    now_epoch = time.time()
+                    notify = False
+                    with self._lock:
+                        retry_after = self._unknown_retry_after.get(process_key, 0.0)
+                        if now_epoch >= retry_after and process_key not in self._pending_unknown_processes:
+                            self._pending_unknown_processes.add(process_key)
+                            notify = True
+                    if notify and self.unknown_app_callback:
+                        self.unknown_app_callback(window.process_name, window.title)
+                    elapsed = time.time() - loop_start
+                    time.sleep(max(0.05, self.sample_interval - elapsed))
+                    continue
+
+                now = time.time()
                 with self._lock:
-                    retry_after = self._unknown_retry_after.get(process_key, 0.0)
-                    if now_epoch >= retry_after and process_key not in self._pending_unknown_processes:
-                        self._pending_unknown_processes.add(process_key)
-                        notify = True
-                if notify and self.unknown_app_callback:
-                    self.unknown_app_callback(window.process_name, window.title)
+                    keyboard_events = self._keyboard_events
+                    mouse_events = self._mouse_events
+                    self._keyboard_events = 0
+                    self._mouse_events = 0
+                    idle_seconds = max(0.0, now - self._last_input)
+
+                force_idle = category == "system_idle"
+                if force_idle:
+                    keyboard_events = 0
+                    mouse_events = 0
+                    idle_seconds = max(idle_seconds, self.sample_interval)
+                is_idle = force_idle or idle_seconds >= self.idle_threshold_seconds
+
+                signature = ("system_idle", "system_idle") if force_idle else (process_key, category)
+                if force_idle:
+                    window_title = "System Idle"
+                    process_name = "system"
+                else:
+                    window_title = window.title
+                    process_name = window.process_name
+
+                if self._segment_signature is None:
+                    self._start_segment(
+                        signature=signature,
+                        process_name=process_name,
+                        window_title=window_title,
+                        category=category,
+                        is_idle=is_idle,
+                        keyboard_events=keyboard_events,
+                        mouse_events=mouse_events,
+                    )
+                elif self._segment_signature == signature:
+                    self._segment_duration_seconds += self.sample_interval
+                    self._segment_keyboard_events += keyboard_events
+                    self._segment_mouse_events += mouse_events
+                    self._segment_is_idle = self._segment_is_idle and is_idle
+                else:
+                    self._flush_segment()
+                    self._start_segment(
+                        signature=signature,
+                        process_name=process_name,
+                        window_title=window_title,
+                        category=category,
+                        is_idle=is_idle,
+                        keyboard_events=keyboard_events,
+                        mouse_events=mouse_events,
+                    )
+
                 elapsed = time.time() - loop_start
                 time.sleep(max(0.05, self.sample_interval - elapsed))
-                continue
-
-            now = time.time()
-            with self._lock:
-                keyboard_events = self._keyboard_events
-                mouse_events = self._mouse_events
-                self._keyboard_events = 0
-                self._mouse_events = 0
-                idle_seconds = max(0.0, now - self._last_input)
-
-            force_idle = category == "system_idle"
-            if force_idle:
-                keyboard_events = 0
-                mouse_events = 0
-                idle_seconds = max(idle_seconds, self.sample_interval)
-            is_idle = force_idle or idle_seconds >= self.idle_threshold_seconds
-            ts = datetime.now().isoformat(timespec="seconds")
-            self.storage.insert_sample(
-                ts=ts,
-                window_title=window.title,
-                process_name=window.process_name,
-                category=category,
-                keyboard_events=keyboard_events,
-                mouse_events=mouse_events,
-                idle_seconds=idle_seconds,
-                is_idle=is_idle,
-                sample_seconds=self.sample_interval,
-            )
-            elapsed = time.time() - loop_start
-            time.sleep(max(0.05, self.sample_interval - elapsed))
+        finally:
+            self._flush_segment()
 
     def resolve_unknown_process(self, process_name: str, resolved: bool) -> None:
         process_key = process_name.lower()
@@ -187,11 +227,15 @@ class ActivityTracker:
     def _is_internal_window(self, window: WindowInfo) -> bool:
         process = window.process_name.lower()
         title = window.title.lower()
+        if window.pid == self._app_pid:
+            return True
         if process in self._internal_process_names:
             return True
         if "focus forensics" in title and process == "python.exe":
             return True
         if "focus forensics" in title and process == "pythonw.exe":
+            return True
+        if any(keyword in title for keyword in self._internal_title_keywords) and process in {"python.exe", "pythonw.exe", "focusforensics.exe"}:
             return True
         return False
 
@@ -204,10 +248,57 @@ class ActivityTracker:
             return "system_idle"
         return self.rules_store.categorize(window.process_name, window.title)
 
+    def _start_segment(
+        self,
+        signature: tuple[str, str],
+        process_name: str,
+        window_title: str,
+        category: str,
+        is_idle: bool,
+        keyboard_events: int,
+        mouse_events: int,
+    ) -> None:
+        self._segment_signature = signature
+        self._segment_start_ts = time.time()
+        self._segment_process_name = process_name
+        self._segment_window_title = window_title
+        self._segment_category = category
+        self._segment_is_idle = is_idle
+        self._segment_keyboard_events = keyboard_events
+        self._segment_mouse_events = mouse_events
+        self._segment_duration_seconds = self.sample_interval
+
+    def _flush_segment(self) -> None:
+        if self._segment_signature is None or self._segment_start_ts is None:
+            return
+        duration = max(0.1, self._segment_duration_seconds)
+        ts = datetime.fromtimestamp(self._segment_start_ts).isoformat(timespec="seconds")
+        self.storage.insert_sample(
+            ts=ts,
+            window_title=self._segment_window_title,
+            process_name=self._segment_process_name,
+            category=self._segment_category,
+            keyboard_events=self._segment_keyboard_events,
+            mouse_events=self._segment_mouse_events,
+            idle_seconds=duration if self._segment_is_idle else 0.0,
+            is_idle=self._segment_is_idle,
+            sample_seconds=duration,
+        )
+        self._segment_signature = None
+        self._segment_start_ts = None
+        self._segment_process_name = ""
+        self._segment_window_title = ""
+        self._segment_category = ""
+        self._segment_is_idle = False
+        self._segment_keyboard_events = 0
+        self._segment_mouse_events = 0
+        self._segment_duration_seconds = 0.0
+
 
 def get_active_window_info() -> WindowInfo:
     title = "Unknown Window"
     process_name = "unknown.exe"
+    pid_value = 0
     try:
         user32 = ctypes.windll.user32
         hwnd = user32.GetForegroundWindow()
@@ -220,7 +311,8 @@ def get_active_window_info() -> WindowInfo:
             pid = wintypes.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             if pid.value:
+                pid_value = int(pid.value)
                 process_name = psutil.Process(pid.value).name()
     except Exception:
         pass
-    return WindowInfo(title=title, process_name=process_name)
+    return WindowInfo(title=title, process_name=process_name, pid=pid_value)

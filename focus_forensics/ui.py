@@ -11,7 +11,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 from focus_forensics.analyzer import DailyReport, TrendReport, analyze_daily, analyze_trend
-from focus_forensics.categorizer import CategoryRulesStore, parse_keywords
+from focus_forensics.categorizer import CategoryRulesStore
 from focus_forensics.exporter import export_csv, export_json, export_text
 from focus_forensics.paths import data_file
 from focus_forensics.storage import Storage
@@ -49,8 +49,19 @@ class FocusForensicsApp:
         self.spikes_var = tk.StringVar(value="0")
         self.weekly_summary_var = tk.StringVar(value="No data yet")
         self.monthly_summary_var = tk.StringVar(value="No data yet")
-        self.rule_category_var = tk.StringVar(value="")
-        self.rule_keywords_var = tk.StringVar(value="")
+        self.rule_category_var = tk.StringVar(value="coding")
+        self.rule_app_var = tk.StringVar(value="")
+        self.rule_keyword_var = tk.StringVar(value="")
+        self.rule_category_options = (
+            "coding",
+            "browsing",
+            "communication",
+            "gaming",
+            "video",
+            "design",
+            "writing",
+            "other",
+        )
         self.dark_mode_var = tk.BooleanVar(value=bool(self._settings.get("dark_mode", False)))
         self.style = ttk.Style(self.root)
 
@@ -137,28 +148,38 @@ class FocusForensicsApp:
 
         form = ttk.LabelFrame(rules, text="Rule Editor", padding=8)
         form.pack(fill=tk.X, pady=(0, 10))
-        ttk.Label(form, text="Category").grid(row=0, column=0, sticky=tk.W, padx=(0, 8))
-        ttk.Entry(form, textvariable=self.rule_category_var, width=24).grid(row=0, column=1, sticky=tk.W)
-        ttk.Label(form, text="Keywords (comma-separated)").grid(row=0, column=2, sticky=tk.W, padx=(14, 8))
-        ttk.Entry(form, textvariable=self.rule_keywords_var, width=48).grid(row=0, column=3, sticky=tk.W)
+        ttk.Label(form, text="Application").grid(row=0, column=0, sticky=tk.W, padx=(0, 8))
+        ttk.Entry(form, textvariable=self.rule_app_var, width=28).grid(row=0, column=1, sticky=tk.W)
+        ttk.Label(form, text="Keyword").grid(row=0, column=2, sticky=tk.W, padx=(14, 8))
+        ttk.Entry(form, textvariable=self.rule_keyword_var, width=28).grid(row=0, column=3, sticky=tk.W)
+        ttk.Label(form, text="Category").grid(row=0, column=4, sticky=tk.W, padx=(14, 8))
+        ttk.Combobox(
+            form,
+            textvariable=self.rule_category_var,
+            values=self.rule_category_options,
+            width=16,
+            state="readonly",
+        ).grid(row=0, column=5, sticky=tk.W)
 
         buttons = ttk.Frame(rules)
         buttons.pack(fill=tk.X, pady=(0, 10))
-        ttk.Button(buttons, text="Add Rule", command=self.add_rule).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(buttons, text="Add Mapping", command=self.add_rule).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(buttons, text="Update Selected", command=self.update_selected_rule).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(buttons, text="Delete Selected", command=self.delete_selected_rule).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(buttons, text="Reset Defaults", command=self.reset_default_rules).pack(side=tk.LEFT)
 
         self.rules_tree = ttk.Treeview(
             rules,
-            columns=("category", "keywords"),
+            columns=("application", "keyword", "category"),
             show="headings",
             height=16,
         )
+        self.rules_tree.heading("application", text="Application")
+        self.rules_tree.heading("keyword", text="Keyword")
         self.rules_tree.heading("category", text="Category")
-        self.rules_tree.heading("keywords", text="Keywords")
+        self.rules_tree.column("application", width=320, anchor=tk.W)
+        self.rules_tree.column("keyword", width=320, anchor=tk.W)
         self.rules_tree.column("category", width=180, anchor=tk.W)
-        self.rules_tree.column("keywords", width=720, anchor=tk.W)
         self.rules_tree.pack(fill=tk.BOTH, expand=True)
         self.rules_tree.bind("<<TreeviewSelect>>", self.on_rule_selected)
 
@@ -383,12 +404,12 @@ class FocusForensicsApp:
             self.tracker.resolve_unknown_process(process_name, resolved=False)
             return
 
-        self._save_keyword_rule(category.strip().lower(), keyword_value)
+        self._save_keyword_rule(process_name, category.strip().lower(), keyword_value)
         self._render_rules()
         self.tracker.resolve_unknown_process(process_name, resolved=True)
 
-    def _save_keyword_rule(self, category: str, keyword: str) -> None:
-        self.rules_store.upsert_keyword(category, keyword)
+    def _save_keyword_rule(self, application: str, category: str, keyword: str) -> None:
+        self.rules_store.upsert_app_rule(application, keyword, category)
 
     def _render_trend_plot(self, axis, trend: TrendReport, title: str) -> None:
         axis.clear()
@@ -411,12 +432,12 @@ class FocusForensicsApp:
 
     def _render_rules(self) -> None:
         self.rules_tree.delete(*self.rules_tree.get_children())
-        for index, rule in enumerate(self.rules_store.get_rules()):
+        for index, rule in enumerate(self.rules_store.get_app_rules()):
             self.rules_tree.insert(
                 "",
                 tk.END,
                 iid=str(index),
-                values=(rule.category, ", ".join(rule.keywords)),
+                values=(rule.application, rule.keyword, rule.category),
             )
 
     def on_rule_selected(self, _event=None) -> None:
@@ -426,8 +447,9 @@ class FocusForensicsApp:
         values = self.rules_tree.item(str(selected_id), "values")
         if not values:
             return
-        self.rule_category_var.set(str(values[0]))
-        self.rule_keywords_var.set(str(values[1]))
+        self.rule_app_var.set(str(values[0]))
+        self.rule_keyword_var.set(str(values[1]))
+        self.rule_category_var.set(str(values[2]))
 
     def _selected_rule_id(self) -> int | None:
         selected = self.rules_tree.selection()
@@ -437,15 +459,16 @@ class FocusForensicsApp:
 
     def add_rule(self) -> None:
         try:
-            self.rules_store.add_rule(
+            self.rules_store.add_app_rule(
+                self.rule_app_var.get(),
+                self.rule_keyword_var.get(),
                 self.rule_category_var.get(),
-                parse_keywords(self.rule_keywords_var.get()),
             )
         except ValueError as exc:
             messagebox.showerror("Rules", str(exc))
             return
-        self.rule_category_var.set("")
-        self.rule_keywords_var.set("")
+        self.rule_app_var.set("")
+        self.rule_keyword_var.set("")
         self._render_rules()
 
     def update_selected_rule(self) -> None:
@@ -454,10 +477,11 @@ class FocusForensicsApp:
             messagebox.showwarning("Rules", "Select a rule to update.")
             return
         try:
-            self.rules_store.update_rule(
+            self.rules_store.update_app_rule(
                 selected_id,
+                self.rule_app_var.get(),
+                self.rule_keyword_var.get(),
                 self.rule_category_var.get(),
-                parse_keywords(self.rule_keywords_var.get()),
             )
         except (ValueError, IndexError) as exc:
             messagebox.showerror("Rules", str(exc))
@@ -471,20 +495,21 @@ class FocusForensicsApp:
             messagebox.showwarning("Rules", "Select a rule to delete.")
             return
         try:
-            self.rules_store.delete_rule(selected_id)
+            self.rules_store.delete_app_rule(selected_id)
         except IndexError:
             messagebox.showerror("Rules", "Selected rule no longer exists.")
             return
-        self.rule_category_var.set("")
-        self.rule_keywords_var.set("")
+        self.rule_app_var.set("")
+        self.rule_keyword_var.set("")
         self._render_rules()
 
     def reset_default_rules(self) -> None:
         if not messagebox.askyesno("Rules", "Reset all category rules to defaults?"):
             return
         self.rules_store.reset_defaults()
-        self.rule_category_var.set("")
-        self.rule_keywords_var.set("")
+        self.rule_app_var.set("")
+        self.rule_keyword_var.set("")
+        self.rule_category_var.set("coding")
         self._render_rules()
 
     def export_report(self) -> None:

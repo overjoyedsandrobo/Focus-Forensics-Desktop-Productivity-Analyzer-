@@ -14,6 +14,13 @@ class CategoryRule:
     keywords: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class AppRule:
+    application: str
+    keyword: str
+    category: str
+
+
 DEFAULT_RULES: tuple[CategoryRule, ...] = (
     CategoryRule("coding", ("code", "pycharm", "visual studio", "terminal", "powershell", "cmd", "github")),
     CategoryRule("browsing", ("chrome", "firefox", "edge", "browser")),
@@ -24,10 +31,40 @@ DEFAULT_RULES: tuple[CategoryRule, ...] = (
     CategoryRule("writing", ("word", "notion", "obsidian", "docs")),
 )
 
+DEFAULT_APP_RULES: tuple[AppRule, ...] = (
+    AppRule("code.exe", "visual studio code", "coding"),
+    AppRule("pycharm64.exe", "pycharm", "coding"),
+    AppRule("chrome.exe", "chrome", "browsing"),
+    AppRule("msedge.exe", "edge", "browsing"),
+    AppRule("firefox.exe", "firefox", "browsing"),
+    AppRule("discord.exe", "discord", "communication"),
+    AppRule("teams.exe", "teams", "communication"),
+    AppRule("steam.exe", "steam", "gaming"),
+    AppRule("epicgameslauncher.exe", "epic", "gaming"),
+    AppRule("explorer.exe", "program manager", "system_idle"),
+    AppRule("searchhost.exe", "search", "system_idle"),
+    AppRule("notepad.exe", "notepad", "system_idle"),
+)
 
-def categorize(process_name: str, window_title: str, rules: Iterable[CategoryRule] = DEFAULT_RULES) -> str:
+
+def categorize(
+    process_name: str,
+    window_title: str,
+    rules: Iterable[CategoryRule] = DEFAULT_RULES,
+    app_rules: Iterable[AppRule] | None = None,
+) -> str:
     haystack = f"{process_name} {window_title}".lower()
     normalized_haystack = _normalize_text(haystack)
+    process_base = _process_basename(process_name)
+    if app_rules:
+        for app_rule in app_rules:
+            app_match = _process_basename(app_rule.application) == process_base
+            if not app_match:
+                continue
+            keyword = app_rule.keyword.lower()
+            normalized_keyword = _normalize_text(keyword)
+            if keyword in haystack or (normalized_keyword and normalized_keyword in normalized_haystack):
+                return app_rule.category
     for rule in rules:
         for keyword in rule.keywords:
             normalized_keyword = _normalize_text(keyword)
@@ -44,26 +81,39 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.lower())
 
 
+def _process_basename(process_name: str) -> str:
+    base = process_name.lower().strip()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    return base
+
+
 class CategoryRulesStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
         self._rules: list[CategoryRule] = []
+        self._app_rules: list[AppRule] = []
         self._load_or_defaults()
 
     def _load_or_defaults(self) -> None:
         if not self.path.exists():
             self._rules = list(DEFAULT_RULES)
+            self._app_rules = list(DEFAULT_APP_RULES)
             self.save()
             return
 
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
             self._rules = self._deserialize_rules(payload.get("rules", []))
+            self._app_rules = self._deserialize_app_rules(payload.get("app_rules", []))
             if not self._rules:
                 self._rules = list(DEFAULT_RULES)
+            if not self._app_rules:
+                self._app_rules = list(DEFAULT_APP_RULES)
         except Exception:
             self._rules = list(DEFAULT_RULES)
+            self._app_rules = list(DEFAULT_APP_RULES)
 
     def _deserialize_rules(self, rows: list[dict[str, Any]]) -> list[CategoryRule]:
         rules: list[CategoryRule] = []
@@ -79,9 +129,23 @@ class CategoryRulesStore:
                 rules.append(CategoryRule(category=category, keywords=keywords))
         return rules
 
+    def _deserialize_app_rules(self, rows: list[dict[str, Any]]) -> list[AppRule]:
+        app_rules: list[AppRule] = []
+        for row in rows:
+            application = str(row.get("application", "")).strip().lower()
+            keyword = str(row.get("keyword", "")).strip().lower()
+            category = str(row.get("category", "")).strip().lower()
+            if application and keyword and category:
+                app_rules.append(AppRule(application=application, keyword=keyword, category=category))
+        return app_rules
+
     def get_rules(self) -> list[CategoryRule]:
         with self._lock:
             return list(self._rules)
+
+    def get_app_rules(self) -> list[AppRule]:
+        with self._lock:
+            return list(self._app_rules)
 
     def add_rule(self, category: str, keywords: Iterable[str]) -> None:
         normalized = self._normalize_rule(category, keywords)
@@ -103,6 +167,7 @@ class CategoryRulesStore:
     def reset_defaults(self) -> None:
         with self._lock:
             self._rules = list(DEFAULT_RULES)
+            self._app_rules = list(DEFAULT_APP_RULES)
             self.save()
 
     def upsert_keyword(self, category: str, keyword: str) -> None:
@@ -123,6 +188,35 @@ class CategoryRulesStore:
             self._rules.append(CategoryRule(clean_category, (clean_keyword,)))
             self.save()
 
+    def add_app_rule(self, application: str, keyword: str, category: str) -> None:
+        normalized = self._normalize_app_rule(application, keyword, category)
+        with self._lock:
+            self._app_rules.append(normalized)
+            self.save()
+
+    def update_app_rule(self, index: int, application: str, keyword: str, category: str) -> None:
+        normalized = self._normalize_app_rule(application, keyword, category)
+        with self._lock:
+            self._app_rules[index] = normalized
+            self.save()
+
+    def delete_app_rule(self, index: int) -> None:
+        with self._lock:
+            del self._app_rules[index]
+            self.save()
+
+    def upsert_app_rule(self, application: str, keyword: str, category: str) -> None:
+        normalized = self._normalize_app_rule(application, keyword, category)
+        app_base = _process_basename(normalized.application)
+        with self._lock:
+            for idx, rule in enumerate(self._app_rules):
+                if _process_basename(rule.application) == app_base and _normalize_text(rule.keyword) == _normalize_text(normalized.keyword):
+                    self._app_rules[idx] = normalized
+                    self.save()
+                    return
+            self._app_rules.append(normalized)
+            self.save()
+
     def _normalize_rule(self, category: str, keywords: Iterable[str]) -> CategoryRule:
         clean_category = category.strip().lower()
         clean_keywords = tuple(keyword.strip().lower() for keyword in keywords if keyword.strip())
@@ -130,16 +224,33 @@ class CategoryRulesStore:
             raise ValueError("Category and keywords are required.")
         return CategoryRule(category=clean_category, keywords=clean_keywords)
 
+    def _normalize_app_rule(self, application: str, keyword: str, category: str) -> AppRule:
+        clean_application = application.strip().lower()
+        clean_keyword = keyword.strip().lower()
+        clean_category = category.strip().lower()
+        if not clean_application or not clean_keyword or not clean_category:
+            raise ValueError("Application, keyword, and category are required.")
+        return AppRule(application=clean_application, keyword=clean_keyword, category=clean_category)
+
     def save(self) -> None:
         payload = {
             "rules": [
                 {"category": rule.category, "keywords": list(rule.keywords)}
                 for rule in self._rules
-            ]
+            ],
+            "app_rules": [
+                {
+                    "application": rule.application,
+                    "keyword": rule.keyword,
+                    "category": rule.category,
+                }
+                for rule in self._app_rules
+            ],
         }
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def categorize(self, process_name: str, window_title: str) -> str:
         with self._lock:
             current_rules = list(self._rules)
-        return categorize(process_name, window_title, current_rules)
+            current_app_rules = list(self._app_rules)
+        return categorize(process_name, window_title, current_rules, current_app_rules)
