@@ -16,6 +16,31 @@ from focus_forensics.paths import data_file
 from focus_forensics.storage import Storage
 
 
+SYSTEM_IDLE_PROCESSES = {
+    "applicationframehost.exe",
+    "calc.exe",
+    "calculatorapp.exe",
+    "control.exe",
+    "explorer.exe",
+    "fileexplorer.exe",
+    "lockapp.exe",
+    "notepad.exe",
+    "searchapp.exe",
+    "searchhost.exe",
+    "shellexperiencehost.exe",
+    "startmenuexperiencehost.exe",
+    "taskmgr.exe",
+    "textinputhost.exe",
+}
+
+SYSTEM_IDLE_TITLE_KEYWORDS = (
+    "search",
+    "start menu",
+    "task switching",
+    "windows input experience",
+)
+
+
 @dataclass
 class WindowInfo:
     title: str
@@ -103,7 +128,8 @@ class ActivityTracker:
                 elapsed = time.time() - loop_start
                 time.sleep(max(0.05, self.sample_interval - elapsed))
                 continue
-            category = self.rules_store.categorize(window.process_name, window.title)
+
+            category = self._categorize_or_system_idle(window)
             process_key = window.process_name.lower()
 
             if category == "other":
@@ -128,7 +154,12 @@ class ActivityTracker:
                 self._mouse_events = 0
                 idle_seconds = max(0.0, now - self._last_input)
 
-            is_idle = idle_seconds >= self.idle_threshold_seconds
+            force_idle = category == "system_idle"
+            if force_idle:
+                keyboard_events = 0
+                mouse_events = 0
+                idle_seconds = max(idle_seconds, self.sample_interval)
+            is_idle = force_idle or idle_seconds >= self.idle_threshold_seconds
             ts = datetime.now().isoformat(timespec="seconds")
             self.storage.insert_sample(
                 ts=ts,
@@ -160,7 +191,18 @@ class ActivityTracker:
             return True
         if "focus forensics" in title and process == "python.exe":
             return True
+        if "focus forensics" in title and process == "pythonw.exe":
+            return True
         return False
+
+    def _categorize_or_system_idle(self, window: WindowInfo) -> str:
+        process = window.process_name.lower()
+        title = window.title.lower()
+        if process in SYSTEM_IDLE_PROCESSES:
+            return "system_idle"
+        if any(keyword in title for keyword in SYSTEM_IDLE_TITLE_KEYWORDS):
+            return "system_idle"
+        return self.rules_store.categorize(window.process_name, window.title)
 
 
 def get_active_window_info() -> WindowInfo:
