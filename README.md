@@ -14,6 +14,7 @@ Desktop productivity behavior analyzer for Windows.
 - Includes light/dark theme toggle (saved in settings)
 - Ignores Focus Forensics itself and auto-marks common Windows shell/utility windows as `system_idle`
 - Rules tab supports explicit `Application + Keyword + Category` mappings
+- Rules tab also lets you add/delete categories directly
 - Generates daily analytics:
   - Deep-focus time
   - Distraction spikes

@@ -52,16 +52,7 @@ class FocusForensicsApp:
         self.rule_category_var = tk.StringVar(value="coding")
         self.rule_app_var = tk.StringVar(value="")
         self.rule_keyword_var = tk.StringVar(value="")
-        self.rule_category_options = (
-            "coding",
-            "browsing",
-            "communication",
-            "gaming",
-            "video",
-            "design",
-            "writing",
-            "other",
-        )
+        self.rule_category_options = tuple(self.rules_store.get_categories())
         self.dark_mode_var = tk.BooleanVar(value=bool(self._settings.get("dark_mode", False)))
         self.style = ttk.Style(self.root)
 
@@ -153,19 +144,21 @@ class FocusForensicsApp:
         ttk.Label(form, text="Keyword").grid(row=0, column=2, sticky=tk.W, padx=(14, 8))
         ttk.Entry(form, textvariable=self.rule_keyword_var, width=28).grid(row=0, column=3, sticky=tk.W)
         ttk.Label(form, text="Category").grid(row=0, column=4, sticky=tk.W, padx=(14, 8))
-        ttk.Combobox(
+        self.category_combo = ttk.Combobox(
             form,
             textvariable=self.rule_category_var,
             values=self.rule_category_options,
             width=16,
             state="readonly",
-        ).grid(row=0, column=5, sticky=tk.W)
+        )
+        self.category_combo.grid(row=0, column=5, sticky=tk.W)
 
         buttons = ttk.Frame(rules)
         buttons.pack(fill=tk.X, pady=(0, 10))
-        ttk.Button(buttons, text="Add Mapping", command=self.add_rule).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(buttons, text="Update Selected", command=self.update_selected_rule).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(buttons, text="Delete Selected", command=self.delete_selected_rule).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(buttons, text="Add", command=self.add_rule).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(buttons, text="Delete", command=self.delete_selected_rule).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(buttons, text="Add Category", command=self.add_category).pack(side=tk.LEFT, padx=(8, 8))
+        ttk.Button(buttons, text="Delete Category", command=self.delete_category).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(buttons, text="Reset Defaults", command=self.reset_default_rules).pack(side=tk.LEFT)
 
         self.rules_tree = ttk.Treeview(
@@ -410,6 +403,7 @@ class FocusForensicsApp:
 
     def _save_keyword_rule(self, application: str, category: str, keyword: str) -> None:
         self.rules_store.upsert_app_rule(application, keyword, category)
+        self._refresh_category_options()
 
     def _render_trend_plot(self, axis, trend: TrendReport, title: str) -> None:
         axis.clear()
@@ -469,25 +463,8 @@ class FocusForensicsApp:
             return
         self.rule_app_var.set("")
         self.rule_keyword_var.set("")
+        self._refresh_category_options()
         self._render_rules()
-
-    def update_selected_rule(self) -> None:
-        selected_id = self._selected_rule_id()
-        if selected_id is None:
-            messagebox.showwarning("Rules", "Select a rule to update.")
-            return
-        try:
-            self.rules_store.update_app_rule(
-                selected_id,
-                self.rule_app_var.get(),
-                self.rule_keyword_var.get(),
-                self.rule_category_var.get(),
-            )
-        except (ValueError, IndexError) as exc:
-            messagebox.showerror("Rules", str(exc))
-            return
-        self._render_rules()
-        self.rules_tree.selection_set(str(selected_id))
 
     def delete_selected_rule(self) -> None:
         selected_id = self._selected_rule_id()
@@ -501,6 +478,7 @@ class FocusForensicsApp:
             return
         self.rule_app_var.set("")
         self.rule_keyword_var.set("")
+        self._refresh_category_options()
         self._render_rules()
 
     def reset_default_rules(self) -> None:
@@ -509,8 +487,45 @@ class FocusForensicsApp:
         self.rules_store.reset_defaults()
         self.rule_app_var.set("")
         self.rule_keyword_var.set("")
-        self.rule_category_var.set("coding")
+        self._refresh_category_options(default_category="coding")
         self._render_rules()
+
+    def add_category(self) -> None:
+        name = simpledialog.askstring("Add Category", "Enter new category name:", parent=self.root)
+        if not name:
+            return
+        try:
+            self.rules_store.add_category(name)
+        except ValueError as exc:
+            messagebox.showerror("Category", str(exc))
+            return
+        self._refresh_category_options(default_category=name.strip().lower())
+
+    def delete_category(self) -> None:
+        category = self.rule_category_var.get().strip().lower()
+        if not category:
+            messagebox.showwarning("Category", "Select a category to delete.")
+            return
+        if not messagebox.askyesno("Delete Category", f"Delete category '{category}' and its mappings?"):
+            return
+        try:
+            self.rules_store.delete_category(category)
+        except ValueError as exc:
+            messagebox.showerror("Category", str(exc))
+            return
+        self._refresh_category_options(default_category="coding")
+        self._render_rules()
+
+    def _refresh_category_options(self, default_category: str | None = None) -> None:
+        categories = self.rules_store.get_categories()
+        if not categories:
+            categories = ["coding"]
+        self.rule_category_options = tuple(categories)
+        self.category_combo.configure(values=self.rule_category_options)
+        target = (default_category or self.rule_category_var.get() or categories[0]).strip().lower()
+        if target not in categories:
+            target = categories[0]
+        self.rule_category_var.set(target)
 
     def export_report(self) -> None:
         samples = self.storage.get_samples_for_day(date.today())

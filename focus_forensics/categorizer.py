@@ -21,6 +21,19 @@ class AppRule:
     category: str
 
 
+DEFAULT_CATEGORIES: tuple[str, ...] = (
+    "coding",
+    "browsing",
+    "communication",
+    "gaming",
+    "video",
+    "design",
+    "writing",
+    "other",
+    "system_idle",
+)
+
+
 DEFAULT_RULES: tuple[CategoryRule, ...] = (
     CategoryRule("coding", ("code", "pycharm", "visual studio", "terminal", "powershell", "cmd", "github")),
     CategoryRule("browsing", ("chrome", "firefox", "edge", "browser")),
@@ -92,12 +105,14 @@ class CategoryRulesStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
+        self._categories: list[str] = []
         self._rules: list[CategoryRule] = []
         self._app_rules: list[AppRule] = []
         self._load_or_defaults()
 
     def _load_or_defaults(self) -> None:
         if not self.path.exists():
+            self._categories = list(DEFAULT_CATEGORIES)
             self._rules = list(DEFAULT_RULES)
             self._app_rules = list(DEFAULT_APP_RULES)
             self.save()
@@ -105,15 +120,55 @@ class CategoryRulesStore:
 
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
+            self._categories = self._deserialize_categories(payload.get("categories", []))
             self._rules = self._deserialize_rules(payload.get("rules", []))
             self._app_rules = self._deserialize_app_rules(payload.get("app_rules", []))
+            if not self._categories:
+                self._categories = list(DEFAULT_CATEGORIES)
             if not self._rules:
                 self._rules = list(DEFAULT_RULES)
             if not self._app_rules:
                 self._app_rules = list(DEFAULT_APP_RULES)
         except Exception:
+            self._categories = list(DEFAULT_CATEGORIES)
             self._rules = list(DEFAULT_RULES)
             self._app_rules = list(DEFAULT_APP_RULES)
+
+    def _deserialize_categories(self, rows: list[Any]) -> list[str]:
+        categories: list[str] = []
+        for row in rows:
+            category = str(row).strip().lower()
+            if category and category not in categories:
+                categories.append(category)
+        return categories
+
+    def get_categories(self) -> list[str]:
+        with self._lock:
+            return list(self._categories)
+
+    def add_category(self, category: str) -> None:
+        clean_category = category.strip().lower()
+        if not clean_category:
+            raise ValueError("Category is required.")
+        with self._lock:
+            if clean_category in self._categories:
+                raise ValueError("Category already exists.")
+            self._categories.append(clean_category)
+            self.save()
+
+    def delete_category(self, category: str) -> None:
+        clean_category = category.strip().lower()
+        if not clean_category:
+            raise ValueError("Category is required.")
+        if clean_category in {"other", "system_idle"}:
+            raise ValueError("Reserved category cannot be deleted.")
+        with self._lock:
+            if clean_category not in self._categories:
+                raise ValueError("Category does not exist.")
+            self._categories = [item for item in self._categories if item != clean_category]
+            self._rules = [rule for rule in self._rules if rule.category != clean_category]
+            self._app_rules = [rule for rule in self._app_rules if rule.category != clean_category]
+            self.save()
 
     def _deserialize_rules(self, rows: list[dict[str, Any]]) -> list[CategoryRule]:
         rules: list[CategoryRule] = []
@@ -166,6 +221,7 @@ class CategoryRulesStore:
 
     def reset_defaults(self) -> None:
         with self._lock:
+            self._categories = list(DEFAULT_CATEGORIES)
             self._rules = list(DEFAULT_RULES)
             self._app_rules = list(DEFAULT_APP_RULES)
             self.save()
@@ -222,6 +278,8 @@ class CategoryRulesStore:
         clean_keywords = tuple(keyword.strip().lower() for keyword in keywords if keyword.strip())
         if not clean_category or not clean_keywords:
             raise ValueError("Category and keywords are required.")
+        if clean_category not in self._categories:
+            self._categories.append(clean_category)
         return CategoryRule(category=clean_category, keywords=clean_keywords)
 
     def _normalize_app_rule(self, application: str, keyword: str, category: str) -> AppRule:
@@ -230,10 +288,13 @@ class CategoryRulesStore:
         clean_category = category.strip().lower()
         if not clean_application or not clean_keyword or not clean_category:
             raise ValueError("Application, keyword, and category are required.")
+        if clean_category not in self._categories:
+            self._categories.append(clean_category)
         return AppRule(application=clean_application, keyword=clean_keyword, category=clean_category)
 
     def save(self) -> None:
         payload = {
+            "categories": self._categories,
             "rules": [
                 {"category": rule.category, "keywords": list(rule.keywords)}
                 for rule in self._rules
